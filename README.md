@@ -1,6 +1,6 @@
 # UniFi Doorbell → Slack Snapshot Integration
 
-Automatically posts a camera snapshot to Slack when someone rings your UniFi G4 Doorbell. No public URL required — the image is uploaded directly to Slack using a bot token.
+Automatically posts a camera snapshot to Slack when someone rings your UniFi G4 Doorbell. No public URL required — the image is uploaded directly to Slack using a bot token, keeping everything on your local network.
 
 ## How It Works
 
@@ -25,7 +25,6 @@ Python uploads image directly to Slack
 | Doorbell | UniFi G4 Doorbell with UniFi Protect |
 | Hub | Mac Mini (always on, macOS) |
 | Home Automation | Home Assistant OS in UTM VM |
-| Remote Access | Tailscale + socat |
 | Notification | Slack (bot token, direct file upload) |
 
 ---
@@ -36,8 +35,7 @@ Python uploads image directly to Slack
 - Mac Mini running macOS (always on)
 - Home Assistant OS running in UTM VM on the Mac Mini
 - UniFi Protect integration configured in Home Assistant
-- Python 3 with Miniconda (or any Python 3 install)
-- Tailscale installed on Mac Mini
+- Python 3 (Miniconda or any Python 3 install)
 - Slack workspace with admin access
 
 ---
@@ -84,7 +82,7 @@ cp scripts/slack_doorbell_uploader.py ~/slack_doorbell_uploader.py
 vim ~/slack_doorbell_uploader.py
 ```
 
-Update these variables:
+Update these three variables:
 
 ```python
 SLACK_BOT_TOKEN = "xoxb-your-token-here"
@@ -106,7 +104,7 @@ You should see the image appear in your Slack channel.
 
 ### Step 3: Set Up SSH Key Auth (HA → Mac Mini)
 
-Home Assistant needs passwordless SSH access to the Mac Mini to copy the snapshot and run the script.
+Home Assistant needs passwordless SSH access to the Mac Mini to copy the snapshot and run the Python script.
 
 **In the Home Assistant Terminal add-on** (Settings → Add-ons → Terminal & SSH → Open Web UI):
 
@@ -116,7 +114,7 @@ ssh-keygen -t ed25519 -f /config/ssh/id_ed25519 -N ""
 cat /config/ssh/id_ed25519.pub
 ```
 
-Copy the full output (starts with `ssh-ed25519`, ends with `root@core-ssh`).
+Copy the full output — it starts with `ssh-ed25519` and ends with `root@core-ssh`.
 
 **On the Mac Mini:**
 
@@ -137,17 +135,7 @@ You should see `test` with no password prompt.
 
 ### Step 4: Configure Home Assistant
 
-**Edit `/homeassistant/configuration.yaml`** (via Settings → Add-ons → File Editor):
-
-Add the `http` block if not present:
-
-```yaml
-http:
-  use_x_forwarded_for: true
-  trusted_proxies:
-    - 127.0.0.1
-    - 192.168.1.x  # Your HA VM's local IP
-```
+**Edit `/homeassistant/configuration.yaml`** via Settings → Add-ons → File Editor.
 
 Add the `shell_command` block:
 
@@ -163,11 +151,11 @@ shell_command:
     /Users/yourusername/slack_doorbell_uploader.py
 ```
 
-> **Note:** Replace `YOUR_MAC_MINI_IP` with your Mac Mini's local IP and `yourusername` with your macOS username. To find the Mac Mini's IP: `ipconfig getifaddr en0`
+> Replace `YOUR_MAC_MINI_IP` with your Mac Mini's local IP (`ipconfig getifaddr en0`) and `yourusername` with your macOS username.
 
-**Do a full HA restart** (Settings → System → Restart → Restart Home Assistant).
+**Do a full HA restart** — Settings → System → Restart → Restart Home Assistant.
 
-> A full restart is required — Quick Reload will not pick up new `shell_command` entries.
+> A full restart is required. Quick Reload will not pick up new `shell_command` entries.
 
 ---
 
@@ -178,61 +166,7 @@ shell_command:
 3. Paste the contents of [`ha_automation.yaml`](ha_automation.yaml)
 4. Click **Save**
 
-> Verify your entity IDs match your setup. Go to **Settings → Devices & Services → UniFi Protect** to find the exact entity names for your doorbell sensor and camera.
-
----
-
-### Step 6: Set Up Tailscale + socat (Optional — Remote Access Only)
-
-> **This step is not required for the doorbell snapshot integration.** The core functionality (ring → snapshot → Slack) works entirely on your local network. Only do this if you want to access the Home Assistant UI or app when away from home WiFi.
-
-**Install Tailscale:**
-
-```bash
-brew install tailscale
-sudo brew services start tailscale
-sudo tailscale up
-```
-
-Authenticate via the URL printed in the output.
-
-**Install socat:**
-
-```bash
-brew install socat
-```
-
-**Make socat persistent:**
-
-```bash
-cp scripts/com.socat.ha-proxy.plist ~/Library/LaunchAgents/
-```
-
-Edit the plist and replace `192.168.1.x` with your HA VM's local IP:
-
-```bash
-vim ~/Library/LaunchAgents/com.socat.ha-proxy.plist
-```
-
-Load it:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.socat.ha-proxy.plist
-launchctl list | grep socat
-```
-
-**Configure Tailscale serve:**
-
-```bash
-tailscale serve --bg --http=80 http://127.0.0.1:8123
-tailscale serve status
-```
-
-**Configure the HA iOS app:**
-
-In the app go to **Settings → Companion App → Server** and set:
-- **Internal URL:** `http://192.168.1.x:8123` (HA VM local IP)
-- **External URL:** `http://your-mac-name.tail8939a2.ts.net` (from `tailscale serve status`)
+> Verify your entity IDs match your setup. Go to **Settings → Devices & Services → UniFi Protect** to confirm the exact names for your doorbell sensor and camera entities.
 
 ---
 
@@ -248,18 +182,18 @@ In the app go to **Settings → Companion App → Server** and set:
 | Error | Fix |
 |-------|-----|
 | `shell_command.run_doorbell_uploader not found` | Do a full HA restart, not Quick Reload |
-| SSH exit code 255 | Verify the public key is in `~/.ssh/authorized_keys` and `-o StrictHostKeyChecking=no` is in both shell commands |
-| Slack upload fails | Verify bot token is correct and bot has been added to the channel |
+| SSH exit code 255 | Verify the public key is in `~/.ssh/authorized_keys` on the Mac Mini and that `-o StrictHostKeyChecking=no` is in both shell commands |
+| Slack upload fails | Verify bot token is correct and the bot has been added to the channel |
 | No snapshot / blank image | Increase the `delay` after `camera.snapshot` (try 3–4 seconds) |
 
 ---
 
 ## Cleanup
 
-Once working, remove legacy Slack integrations to avoid duplicate notifications:
+Once working, remove any legacy Slack integrations to avoid duplicate notifications:
 
-1. In Slack → Manage Apps → remove any legacy Incoming Webhooks for the doorbell channel
-2. In `configuration.yaml`, remove any unused `rest_command` entries for old webhook URLs
+1. In Slack → Manage Apps → remove any legacy Incoming Webhooks configured for the doorbell channel
+2. In `configuration.yaml`, remove any unused `rest_command` entries pointing to old webhook URLs
 3. Do a Quick Reload after cleanup
 
 ---
@@ -268,11 +202,11 @@ Once working, remove legacy Slack integrations to avoid duplicate notifications:
 
 ```
 doorbell-slack-integration/
-├── README.md
-├── ha_automation.yaml              # Home Assistant automation
-├── scripts/
-│   ├── slack_doorbell_uploader.py  # Python upload script (runs on Mac Mini)
-│   └── com.socat.ha-proxy.plist   # launchd plist for persistent socat
+├── README.md                           # This file
+├── ha_automation.yaml                  # Paste directly into HA automation editor
+├── ha_configuration_snippets.yaml      # Snippets to add to configuration.yaml
+└── scripts/
+    └── slack_doorbell_uploader.py      # Python upload script (runs on Mac Mini)
 ```
 
 ---
@@ -287,4 +221,3 @@ doorbell-slack-integration/
 | `YOUR_HA_VM_IP` | HA VM's local IP (`utmctl ip-address <vm-uuid>`) |
 | `yourusername` | Your macOS username |
 | `/Users/yourusername/miniconda3/bin/python3` | Output of `which python3` on Mac Mini |
-| `your-mac-name.tail8939a2.ts.net` | Your Tailscale hostname (`tailscale serve status`) |
